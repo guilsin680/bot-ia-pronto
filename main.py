@@ -1,96 +1,91 @@
 import requests
 import pickle
-from flask import Flask
 from datetime import datetime
 import pytz
-from dateutil import parser
+from flask import Flask
 import os
 
 app = Flask(__name__)
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
+# Carrega modelo e encoders
+with open('modelo.pkl', 'rb') as f:
+    model = pickle.load(f)
+with open('encoders.pkl', 'rb') as f:
+    encoders = pickle.load(f)
 
-# Função para enviar mensagens para o Telegram
-def enviar_telegram(mensagem):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem,
-        "parse_mode": "HTML"
-    }
-    requests.post(url, data=payload)
+# Variáveis de ambiente
+API_KEY = os.getenv("API_FOOTBALL_KEY")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Função para buscar os jogos de hoje
 def buscar_jogos_hoje():
-    url = "https://v3.football.api-sports.io/fixtures"
-    headers = {
-        "x-apisports-key": API_FOOTBALL_KEY
-    }
-
-    hoje = datetime.utcnow().strftime("%Y-%m-%d")
-    params = {
-        "date": hoje,
-        "timezone": "UTC"
-    }
-
-    resposta = requests.get(url, headers=headers, params=params)
+    url = "https://v3.football.api-sports.io/fixtures?date={}".format(datetime.today().strftime('%Y-%m-%d'))
+    headers = {"x-apisports-key": API_KEY}
+    resposta = requests.get(url, headers=headers)
     dados = resposta.json()
-    return dados.get("response", [])
+    return dados["response"]
 
-# Função para prever resultado de uma partida
-def prever_partida(jogo, modelo):
-    home_goals = jogo["goals"]["home"]
-    away_goals = jogo["goals"]["away"]
+def prever_jogos(jogos):
+    mensagens = []
 
-    # Simulação de entrada (usar IA real depois)
-    entrada = [[home_goals or 0, away_goals or 0]]
-    resultado = modelo.predict(entrada)[0]
-    prob = modelo.predict_proba(entrada).max()
+    for jogo in jogos:
+        home = jogo['teams']['home']['name']
+        away = jogo['teams']['away']['name']
+        liga = jogo['league']['name']
+        data_hora_utc = jogo['fixture']['date']
 
-    return resultado, prob
+        try:
+            data_hora = datetime.fromisoformat(data_hora_utc.replace('Z', '+00:00')).astimezone(pytz.timezone("America/Sao_Paulo"))
+        except Exception:
+            data_hora = data_hora_utc
 
-# Rota principal
-@app.route("/")
-def bot():
-    try:
-        with open("modelo.pkl", "rb") as f:
-            modelo = pickle.load(f)
+        if home in encoders['home'].classes_ and away in encoders['away'].classes_:
+            home_encoded = encoders['home'].transform([home])[0]
+            away_encoded = encoders['away'].transform([away])[0]
 
-        jogos = buscar_jogos_hoje()
+            entrada = [[home_encoded, away_encoded, 0, 0]]
+            pred = model.predict(entrada)[0]
+            probs = model.predict_proba(entrada)[0]
+            confianca = round(max(probs) * 100, 2)
 
-        if not jogos:
-            enviar_telegram("Nenhum jogo encontrado para hoje.")
-            return "Sem jogos hoje."
-
-        for jogo in jogos:
-            resultado, confianca = prever_partida(jogo, modelo)
-
-            # Infos detalhadas do jogo
-            data_hora_utc = jogo["fixture"]["date"]
-            data_hora_br = parser.isoparse(data_hora_utc).astimezone(pytz.timezone("America/Sao_Paulo"))
-            data_formatada = data_hora_br.strftime("%d/%m/%Y %H:%M")
-
-            casa = jogo["teams"]["home"]["name"]
-            visitante = jogo["teams"]["away"]["name"]
-            liga = jogo["league"]["name"]
+            if pred == 0:
+                resultado = f"{home} vence"
+            elif pred == 1:
+                resultado = "Empate"
+            else:
+                resultado = f"{away} vence"
 
             msg = (
-                f"<b>Jogo:</b> {casa} vs {visitante}\n"
-                f"<b>Data/Hora:</b> {data_formatada}\n"
-                f"<b>Liga:</b> {liga}\n"
-                f"<b>Previsão:</b> {resultado}\n"
-                f"<b>Confiança:</b> {confianca:.2%}"
+                f"**Previsão de Jogo**\n"
+                f"📅 {data_hora.strftime('%d/%m/%Y %H:%M')}\n"
+                f"🏆 {liga}\n"
+                f"⚽ {home} x {away}\n"
+                f"🧠 Previsão: *{resultado}*\n"
+                f"🔍 Confiança: {confianca}%"
             )
+            mensagens.append(msg)
+    return mensagens
 
-            enviar_telegram(msg)
+def enviar_telegram(texto):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": texto, "parse_mode": "Markdown"}
+    requests.post(url, data=payload)
 
-        return "Previsões enviadas com sucesso."
-
+@app.route('/')
+def bot():
+    try:
+        jogos = buscar_jogos_hoje()
+        mensagens = prever_jogos(jogos)
+        if mensagens:
+            for msg in mensagens:
+                enviar_telegram(msg)
+            return "Mensagens enviadas com sucesso!"
+        else:
+            enviar_telegram("Nenhum jogo disponível hoje para previsão.")
+            return "Nenhum jogo disponível hoje."
     except Exception as e:
-        enviar_telegram(f"Erro no bot: {e}")
-        return f"Erro: {e}", 500
+        enviar_telegram(f"Erro ao executar bot: {e}")
+        return f"Erro interno: {e}", 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    app.run(debug=True)
