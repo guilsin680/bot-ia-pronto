@@ -1,50 +1,21 @@
-import requests
-import os
-from datetime import datetime
+import pickle
+import numpy as np
 
-API_KEY = os.getenv("API_FOOTBALL_KEY")
+# Carregar o modelo treinado
+def carregar_modelo():
+    with open('modelo_ia.pkl', 'rb') as f:
+        modelo = pickle.load(f)
+    return modelo
 
-def prever_resultado():
-    url = "https://v3.football.api-sports.io/fixtures"
-    headers = {"x-apisports-key": API_KEY}
-    params = {
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "timezone": "America/Sao_Paulo",
-        "status": "NS"
-    }
+# Função para prever o resultado
+def prever_resultado(jogo):
+    modelo = carregar_modelo()
 
-    response = requests.get(url, headers=headers, params=params)
-    data = response.json()
+    # Extrair as variáveis para a previsão (ajuste conforme o modelo)
+    features = np.array([jogo['home_goals'], jogo['away_goals'], jogo['home_team_rank'], jogo['away_team_rank']]).reshape(1, -1)
 
-    if "response" not in data or not data["response"]:
-        return "Nenhum jogo encontrado para hoje."
+    resultado = modelo.predict(features)
+    confianca = modelo.predict_proba(features).max() * 100
 
-    mensagem_final = "📊 *Previsões para hoje:*\n\n"
+    return {'prediction': resultado[0], 'confidence': confianca}
 
-    for jogo in data["response"][:5]:  # mostra no máximo 5 jogos por vez
-        info = jogo["fixture"]
-        league = jogo["league"]
-        teams = jogo["teams"]
-
-        data_jogo = datetime.strptime(info["date"], "%Y-%m-%dT%H:%M:%S%z")
-        horario = data_jogo.strftime("%H:%M")
-        data_formatada = data_jogo.strftime("%d/%m/%Y")
-
-        casa = teams["home"]["name"]
-        fora = teams["away"]["name"]
-
-        # Simulação de previsão
-        import random
-        resultado_previsto = random.choice(["Vitória do mandante", "Empate", "Vitória do visitante"])
-        confianca = round(random.uniform(60, 90), 2)
-
-        mensagem_final += (
-            f"🏟️ {casa} x {fora}\n"
-            f"📅 {data_formatada} ⏰ {horario}\n"
-            f"🏆 {league['name']} ({league['country']})\n"
-            f"🔮 Previsão: *{resultado_previsto}*\n"
-            f"✅ Confiança: *{confianca}%*\n"
-            f"───────────────\n"
-        )
-
-    return mensagem_final
