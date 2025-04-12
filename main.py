@@ -1,52 +1,68 @@
 import os
 import requests
+import pickle
 from flask import Flask
 from datetime import datetime
-from predictor import prever_resultado
-from api_football import buscar_jogos
+import pytz
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    # Pega os jogos do dia atual usando a API-Football
-    jogos = buscar_jogos()
+# Configurações
+API_KEY = os.getenv("API_FOOTBALL_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-    mensagens = []
+# Função para buscar jogos de hoje na API-Football
+def buscar_jogos_hoje():
+    hoje = datetime.now(pytz.timezone("America/Sao_Paulo")).strftime("%Y-%m-%d")
+    url = f"https://v3.football.api-sports.io/fixtures?date={hoje}&status=NS"
+    headers = {"x-apisports-key": API_KEY}
+    response = requests.get(url, headers=headers)
+    data = response.json()
+    return data.get("response", [])
 
-    for jogo in jogos:
-        # Faz a previsão com o modelo de IA
-        resultado = prever_resultado(jogo)
+# Função para enviar mensagem ao Telegram
+def enviar_mensagem_telegram(texto):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": texto, "parse_mode": "HTML"}
+    requests.post(url, data=payload)
 
-        # Cria uma mensagem detalhada
-        mensagem = f"""
-        ⚽ **Previsão do jogo**
-        🏟️ **{jogo['home_team']} x {jogo['away_team']}**
-        🕑 **Data e Hora**: {jogo['date']} (Horário de Brasília)
-        🏆 **Liga**: {jogo['league']}
-        
-        **Previsão**: {resultado['prediction']}
-        **Confiança da previsão**: {resultado['confidence']}%
+# Função para simular previsão com IA
+def prever_resultado(jogo):
+    # Simulação de IA (pode usar seu modelo real aqui)
+    return {
+        "previsao": "Casa vence",
+        "confianca": "Alta"
+    }
 
-        🔗 **Link para o jogo**: [Veja mais detalhes](https://www.betfair.com)
-        """
-        mensagens.append(mensagem)
+# Rota principal
+@app.route("/")
+def bot():
+    jogos = buscar_jogos_hoje()
+    if not jogos:
+        enviar_mensagem_telegram("Nenhum jogo encontrado para hoje.")
+        return "Sem jogos"
 
-    # Envia as mensagens para o Telegram
-    enviar_telegram("\n\n".join(mensagens))
+    for jogo in jogos[:5]:  # Limita para evitar spam
+        home = jogo["teams"]["home"]["name"]
+        away = jogo["teams"]["away"]["name"]
+        liga = jogo["league"]["name"]
+        data_hora_utc = jogo["fixture"]["date"]
+        data_hora_br = datetime.fromisoformat(data_hora_utc[:-1]).astimezone(pytz.timezone("America/Sao_Paulo"))
+        horario = data_hora_br.strftime("%d/%m/%Y às %H:%M")
 
-    return '✅ Previsões enviadas para o Telegram com sucesso!'
+        previsao = prever_resultado(jogo)
+        texto = (
+            f"<b>⚽ Previsão de Jogo</b>\n"
+            f"<b>Partida:</b> {home} x {away}\n"
+            f"<b>Liga:</b> {liga}\n"
+            f"<b>Data/Horário:</b> {horario}\n"
+            f"<b>Previsão IA:</b> {previsao['previsao']}\n"
+            f"<b>Confiança:</b> {previsao['confianca']}"
+        )
+        enviar_mensagem_telegram(texto)
 
-def enviar_telegram(mensagem):
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    return "Mensagens enviadas"
 
-    if bot_token and chat_id:
-        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": mensagem, "parse_mode": "Markdown"}
-        requests.post(url, data=payload)
-    else:
-        print("❌ Variáveis de ambiente do Telegram não configuradas.")
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
