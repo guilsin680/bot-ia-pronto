@@ -9,8 +9,7 @@ def obter_jogos():
     url = "https://api-football-v1.p.rapidapi.com/v3/fixtures"
     headers = {
         "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com",
-        "X-RapidAPI-Key": "SUA_API_KEY"  # Substitua com sua chave da API-Football
-    }
+        "X-RapidAPI-Key": "7d42d1204d937e99f1139bdd3c845c48"  
     params = {
         "date": datetime.today().strftime('%Y-%m-%d'),
         "timezone": "America/Sao_Paulo"
@@ -62,5 +61,4 @@ def enviar_previsao():
 
 if __name__ == "__main__":
     enviar_previsao()
-
 
