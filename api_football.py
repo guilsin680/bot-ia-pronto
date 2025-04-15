@@ -1,25 +1,36 @@
 import os
 import requests
 
-def buscar_jogos():
-    api_key = os.getenv('API_FOOTBALL_KEY')
-    url = f"https://api-football-v1.p.rapidapi.com/v3/fixtures?date={datetime.now().strftime('%Y-%m-%d')}"
-    
-    headers = {
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com",
-        "X-RapidAPI-Key": api_key
-    }
+API_KEY = os.getenv("API_FOOTBALL_KEY")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-    response = requests.get(url, headers=headers)
-    jogos = response.json()['response']
+def buscar_jogos_hoje():
+    url = "https://v3.football.api-sports.io/fixtures"
+    headers = {"x-apisports-key": API_KEY}
+    params = {"date": pd.Timestamp.today().strftime('%Y-%m-%d'), "status": "NS"}
 
-    jogos_filtrados = []
-    for jogo in jogos:
-        jogos_filtrados.append({
-            'home_team': jogo['teams']['home']['name'],
-            'away_team': jogo['teams']['away']['name'],
-            'date': jogo['fixture']['date'],
-            'league': jogo['league']['name']
+    response = requests.get(url, headers=headers, params=params)
+    data = response.json()
+
+    jogos = []
+    for item in data["response"]:
+        jogos.append({
+            "league": item["league"]["name"],
+            "home_team": item["teams"]["home"]["name"],
+            "away_team": item["teams"]["away"]["name"],
+            "home_goals": 1,  # valor fictício para exemplo
+            "away_goals": 2,
+            "date": item["fixture"]["date"][:10],
+            "time": item["fixture"]["date"][11:16],
         })
+    return jogos
 
-    return jogos_filtrados
+def enviar_mensagem(msg):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, data=payload)
