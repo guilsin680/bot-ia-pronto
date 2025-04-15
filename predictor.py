@@ -1,21 +1,40 @@
+import pandas as pd
 import pickle
-import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from api import buscar_jogos_hoje, enviar_mensagem
 
-# Carregar o modelo treinado
-def carregar_modelo():
-    with open('modelo_ia.pkl', 'rb') as f:
-        modelo = pickle.load(f)
-    return modelo
+def treinar_modelo():
+    df = pd.read_csv("historico.csv")
 
-# Função para prever o resultado
-def prever_resultado(jogo):
-    modelo = carregar_modelo()
+    df["vencedor"] = df.apply(lambda row: "casa" if row["home_goals"] > row["away_goals"]
+                               else "fora" if row["away_goals"] > row["home_goals"] else "empate", axis=1)
 
-    # Extrair as variáveis para a previsão (ajuste conforme o modelo)
-    features = np.array([jogo['home_goals'], jogo['away_goals'], jogo['home_team_rank'], jogo['away_team_rank']]).reshape(1, -1)
+    X = df[["home_goals", "away_goals"]]
+    y = df["vencedor"]
 
-    resultado = modelo.predict(features)
-    confianca = modelo.predict_proba(features).max() * 100
+    modelo = RandomForestClassifier()
+    modelo.fit(X, y)
 
-    return {'prediction': resultado[0], 'confidence': confianca}
+    with open("modelo.pkl", "wb") as f:
+        pickle.dump(modelo, f)
 
+def prever_partidas(modelo):
+    jogos = buscar_jogos_hoje()
+
+    mensagens = []
+
+    for jogo in jogos:
+        entrada = [[jogo["home_goals"], jogo["away_goals"]]]
+        pred = modelo.predict(entrada)[0]
+        prob = modelo.predict_proba(entrada).max()
+
+        msg = (
+            f"**{jogo['league']}**\n"
+            f"{jogo['home_team']} x {jogo['away_team']}\n"
+            f"Data: {jogo['date']} - {jogo['time']}\n"
+            f"Previsão: {pred.upper()} (Confiança: {prob:.2%})"
+        )
+        mensagens.append(msg)
+
+    for m in mensagens:
+        enviar_mensagem(m)
